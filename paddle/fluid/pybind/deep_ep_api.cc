@@ -97,18 +97,28 @@ void BindDeepEPApi(pybind11::module *m) {
       .def("internode_dispatch", &deep_ep::Buffer::internode_dispatch_api)
       .def("internode_notify_dispatch",
            &deep_ep::Buffer::internode_notify_dispatch_api)
+      .def("internode_notify_combine",
+           &deep_ep::Buffer::internode_notify_combine_api)
+      .def("internode_dispatch_after_notify",
+           &deep_ep::Buffer::internode_dispatch_after_notify_api)
       .def("clear_buffer",
            &deep_ep::Buffer::clear_buffer_api)
       .def("internode_combine", &deep_ep::Buffer::internode_combine_api)
       .def("barrier_all", &deep_ep::Buffer::barrier_all)
       .def("clean_low_latency_buffer",
            &deep_ep::Buffer::clean_low_latency_buffer)
+      .def("clean_low_latency_two_stage_buffer",
+           &deep_ep::Buffer::clean_low_latency_two_stage_buffer)
       .def("low_latency_dispatch", &deep_ep::Buffer::low_latency_dispatch_api)
       .def("low_latency_combine", &deep_ep::Buffer::low_latency_combine_api)
       .def("low_latency_dispatch_two_stage",
            &deep_ep::Buffer::low_latency_dispatch_two_stage_api)
       .def("low_latency_combine_two_stage",
-           &deep_ep::Buffer::low_latency_combine_two_stage_api);
+           &deep_ep::Buffer::low_latency_combine_two_stage_api)
+      .def("m2n_low_latency_dispatch_two_stage",
+           &deep_ep::Buffer::m2n_low_latency_dispatch_two_stage_api)
+      .def("m2n_low_latency_combine_two_stage",
+           &deep_ep::Buffer::m2n_low_latency_combine_two_stage_api);
 #endif
 }
 

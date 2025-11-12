@@ -52,6 +52,10 @@ struct Buffer {
   // Low-latency mode buffer
   int low_latency_buffer_idx = 0;
   bool low_latency_mode = false;
+  int m2n_ll_dispatch_workspace_idx = 0;
+  int m2n_ll_combine_workspace_idx = 0;
+  int m2n_ll_dispatch_recv_complete_idx = 0;
+  int m2n_ll_combine_recv_complete_idx = 0;
 
   // NVLink Buffer
   int64_t num_nvl_bytes;
@@ -270,6 +274,23 @@ void clear_buffer(
       bool async,
       bool allocate_on_comm_stream);
 
+  std::tuple<deep_ep::detail::Tensor,
+             std::optional<deep_ep::detail::Tensor>,
+             std::optional<EventHandle>>
+  internode_combine(const deep_ep::detail::Tensor& x,
+                    const std::optional<deep_ep::detail::Tensor>& topk_weights,
+                    const deep_ep::detail::Tensor& src_meta,
+                    const deep_ep::detail::Tensor& is_combined_token_in_rank,
+                    const deep_ep::detail::Tensor& rdma_channel_prefix_matrix,
+                    const deep_ep::detail::Tensor& rdma_rank_prefix_sum,
+                    const deep_ep::detail::Tensor& gbl_channel_prefix_matrix,
+                    const deep_ep::detail::Tensor& combined_rdma_head,
+                    const deep_ep::detail::Tensor& combined_nvl_head,
+                    const Config& config,
+                    std::optional<EventHandle>& previous_event,  // NOLINT
+                    bool async,
+                    bool allocate_on_comm_stream);
+
   std::tuple<std::vector<int>,         // num_recv_tokens_per_expert_list
              int,                      // num_recv_tokens
              int,                      // num_rdma_recv_tokens
@@ -288,11 +309,73 @@ void clear_buffer(
       int expert_alignment,
       const Config& config);
 
+  std::tuple<
+      deep_ep::detail::Tensor,                 // recv_x
+      std::optional<deep_ep::detail::Tensor>,  // recv_x_scales
+      std::optional<deep_ep::detail::Tensor>,  // recv_topk_idx
+      std::optional<deep_ep::detail::Tensor>,  // recv_topk_weights
+      std::optional<
+          deep_ep::detail::Tensor>,  // recv_rdma_channel_prefix_matrix
+      std::optional<deep_ep::detail::Tensor>,  // recv_gbl_channel_prefix_matrix
+      std::optional<deep_ep::detail::Tensor>,  // recv_src_meta
+      std::optional<deep_ep::detail::Tensor>,  // send_rdma_head
+      std::optional<deep_ep::detail::Tensor>,  // send_nvl_head
+      std::optional<EventHandle>>
+  internode_dispatch_after_notify(
+      const deep_ep::detail::Tensor& x,
+      const std::optional<deep_ep::detail::Tensor>& x_scales,
+      const std::optional<deep_ep::detail::Tensor>& topk_idx,
+      const std::optional<deep_ep::detail::Tensor>& topk_weights,
+      const std::optional<deep_ep::detail::Tensor>& num_tokens_per_rank,
+      const std::optional<deep_ep::detail::Tensor>& num_tokens_per_rdma_rank,
+      const std::optional<deep_ep::detail::Tensor>& num_tokens_per_expert,
+      const deep_ep::detail::Tensor& is_token_in_rank,
+      const deep_ep::detail::Tensor& rdma_channel_prefix_matrix,
+      const deep_ep::detail::Tensor& recv_rdma_rank_prefix_sum,
+      const deep_ep::detail::Tensor& gbl_channel_prefix_matrix,
+      const deep_ep::detail::Tensor& recv_gbl_rank_prefix_sum,
+      bool cached_mode,
+      int num_recv_tokens,
+      int num_rdma_recv_tokens,
+      int expert_alignment,
+      const Config& config,
+      std::optional<EventHandle>& previous_event,  // NOLINT
+      bool async,
+      bool allocate_on_comm_stream);
+
+  std::tuple<int,
+             int,
+             deep_ep::detail::Tensor,
+             deep_ep::detail::Tensor,
+             deep_ep::detail::Tensor,
+             deep_ep::detail::Tensor,
+             deep_ep::detail::Tensor>
+  internode_notify_combine(
+      const deep_ep::detail::Tensor& x,
+      const std::optional<deep_ep::detail::Tensor>& x_scales,
+      const std::optional<deep_ep::detail::Tensor>& topk_idx,
+      const std::optional<deep_ep::detail::Tensor>& num_tokens_per_rank,
+      const std::optional<deep_ep::detail::Tensor>& num_tokens_per_rdma_rank,
+      const std::optional<deep_ep::detail::Tensor>& num_tokens_per_expert,
+      const deep_ep::detail::Tensor& is_token_in_rank,
+      int expert_alignment,
+      const Config& config,
+      std::optional<EventHandle>& previous_event,  // NOLINT
+      bool async,
+      bool allocate_on_comm_stream);
+
+
 #endif  // PADDLE_WITH_NVSHMEM
 
   void clean_low_latency_buffer(int num_max_dispatch_tokens_per_rank,
                                 int hidden,
                                 int num_experts);
+  void clean_low_latency_two_stage_buffer(int num_max_dispatch_tokens_per_rank,
+                                          int hidden,
+                                          int num_experts,
+                                          int num_topk,
+                                          int num_ranks,
+                                          bool use_fp8);
   void barrier_all();
 
 #ifdef PADDLE_WITH_NVSHMEM
@@ -362,6 +445,53 @@ void clear_buffer(
       const deep_ep::detail::Tensor& dispatch_rdma_recv_count,
       int num_max_dispatch_tokens_per_rank,
       int num_experts,
+      bool dispatch_use_fp8,
+      bool async,
+      bool return_recv_hook,
+      const std::optional<deep_ep::detail::Tensor>& out);
+
+  std::tuple<deep_ep::detail::Tensor,
+             std::optional<deep_ep::detail::Tensor>,
+             deep_ep::detail::Tensor,
+             deep_ep::detail::Tensor,
+             deep_ep::detail::Tensor,
+             deep_ep::detail::Tensor,
+             deep_ep::detail::Tensor,
+             deep_ep::detail::Tensor,
+             std::optional<EventHandle>,
+             std::optional<std::function<EventHandle()>>>
+  m2n_low_latency_dispatch_two_stage(
+      const deep_ep::detail::Tensor& x,
+      const deep_ep::detail::Tensor& topk_idx,
+      const deep_ep::detail::Tensor& topk_weights,
+      int num_max_dispatch_tokens_per_rank,
+      int num_experts,
+      int a_start_rank,
+      int a_num_ranks,
+      int e_start_rank,
+      int e_num_ranks,
+      bool use_fp8,
+      bool async,
+      bool return_recv_hook);
+
+  std::tuple<deep_ep::detail::Tensor,
+             std::optional<EventHandle>,
+             std::optional<std::function<EventHandle()>>>
+  m2n_low_latency_combine_two_stage(
+      const deep_ep::detail::Tensor& x,
+      const deep_ep::detail::Tensor& rdma_recv_x,
+      const deep_ep::detail::Tensor& topk_idx,
+      const deep_ep::detail::Tensor& topk_weights,
+      const deep_ep::detail::Tensor& src_info,
+      const deep_ep::detail::Tensor& layout_range,
+      const deep_ep::detail::Tensor& rdma_send_flags,
+      const deep_ep::detail::Tensor& dispatch_rdma_recv_count,
+      int num_max_dispatch_tokens_per_rank,
+      int num_experts,
+      int a_start_rank,
+      int a_num_ranks,
+      int e_start_rank,
+      int e_num_ranks,
       bool dispatch_use_fp8,
       bool async,
       bool return_recv_hook,
@@ -437,6 +567,59 @@ void clear_buffer(
       bool async,
       bool allocate_on_comm_stream);
 
+  std::tuple<int,
+             int,
+             paddle::Tensor,
+             paddle::Tensor,
+             paddle::Tensor,
+             paddle::Tensor,
+             paddle::Tensor>
+  internode_notify_combine_api(
+      const paddle::Tensor& x,
+      const std::optional<paddle::Tensor>& x_scales,
+      const std::optional<paddle::Tensor>& topk_idx,
+      const std::optional<paddle::Tensor>& num_tokens_per_rank,
+      const std::optional<paddle::Tensor>& num_tokens_per_rdma_rank,
+      const std::optional<paddle::Tensor>& num_tokens_per_expert,
+      const paddle::Tensor& is_token_in_rank,
+      int expert_alignment,
+      const Config& config,
+      std::optional<EventHandle>& previous_event,  // NOLINT
+      bool async,
+      bool allocate_on_comm_stream);
+
+  std::tuple<paddle::Tensor,
+             std::optional<paddle::Tensor>,
+             std::optional<paddle::Tensor>,
+             std::optional<paddle::Tensor>,
+             std::optional<paddle::Tensor>,
+             std::optional<paddle::Tensor>,
+             std::optional<paddle::Tensor>,
+             std::optional<paddle::Tensor>,
+             std::optional<paddle::Tensor>,
+             std::optional<EventHandle>>
+  internode_dispatch_after_notify_api(
+      const paddle::Tensor& x,
+      const std::optional<paddle::Tensor>& x_scales,
+      const std::optional<paddle::Tensor>& topk_idx,
+      const std::optional<paddle::Tensor>& topk_weights,
+      const std::optional<paddle::Tensor>& num_tokens_per_rank,
+      const std::optional<paddle::Tensor>& num_tokens_per_rdma_rank,
+      const std::optional<paddle::Tensor>& num_tokens_per_expert,
+      const paddle::Tensor& is_token_in_rank,
+      const paddle::Tensor& rdma_channel_prefix_matrix,
+      const paddle::Tensor& recv_rdma_rank_prefix_sum,
+      const paddle::Tensor& gbl_channel_prefix_matrix,
+      const paddle::Tensor& recv_gbl_rank_prefix_sum,
+      bool cached_mode,
+      int num_recv_tokens,
+      int num_rdma_recv_tokens,
+      int expert_alignment,
+      const Config& config,
+      std::optional<EventHandle>& previous_event,  // NOLINT
+      bool async,
+      bool allocate_on_comm_stream);
+
   std::tuple<paddle::Tensor,
              std::optional<paddle::Tensor>,
              paddle::Tensor,
@@ -502,6 +685,52 @@ void clear_buffer(
       const paddle::Tensor& dispatch_rdma_recv_count,
       int num_max_dispatch_tokens_per_rank,
       int num_experts,
+      bool dispatch_use_fp8,
+      bool async,
+      bool return_recv_hook,
+      const std::optional<paddle::Tensor>& out);
+
+  std::tuple<paddle::Tensor,
+             std::optional<paddle::Tensor>,
+             paddle::Tensor,
+             paddle::Tensor,
+             paddle::Tensor,
+             paddle::Tensor,
+             paddle::Tensor,
+             paddle::Tensor,
+             std::optional<EventHandle>,
+             std::optional<std::function<EventHandle()>>>
+  m2n_low_latency_dispatch_two_stage_api(const paddle::Tensor& x,
+                                         const paddle::Tensor& topk_idx,
+                                         const paddle::Tensor& topk_weights,
+                                         int num_max_dispatch_tokens_per_rank,
+                                         int num_experts,
+                                         int a_start_rank,
+                                         int a_num_ranks,
+                                         int e_start_rank,
+                                         int e_num_ranks,
+                                         bool use_fp8,
+                                         bool async,
+                                         bool return_recv_hook);
+
+  std::tuple<paddle::Tensor,
+             std::optional<EventHandle>,
+             std::optional<std::function<EventHandle()>>>
+  m2n_low_latency_combine_two_stage_api(
+      const paddle::Tensor& x,
+      const paddle::Tensor& rdma_recv_x,
+      const paddle::Tensor& topk_idx,
+      const paddle::Tensor& topk_weights,
+      const paddle::Tensor& src_info,
+      const paddle::Tensor& layout_range,
+      const paddle::Tensor& rdma_send_flags,
+      const paddle::Tensor& dispatch_rdma_recv_count,
+      int num_max_dispatch_tokens_per_rank,
+      int num_experts,
+      int a_start_rank,
+      int a_num_ranks,
+      int e_start_rank,
+      int e_num_ranks,
       bool dispatch_use_fp8,
       bool async,
       bool return_recv_hook,

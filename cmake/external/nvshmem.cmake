@@ -42,18 +42,23 @@ set(NVSHMEM_TAR_NAME "nvshmem_src_3.2.5-1.txz")
 if(NVSHMEM_SRC_TAR_PATH)
   set(NVSHMEM_DOWNLOAD_COMMAND
       rm -rf extern_nvshmem ${NVSHMEM_TAR_NAME} && cp ${NVSHMEM_SRC_TAR_PATH} .
-      && tar xf ${NVSHMEM_TAR_NAME} && mv nvshmem_src extern_nvshmem)
+      && tar xf ${NVSHMEM_TAR_NAME} --no-same-owner && mv nvshmem_src extern_nvshmem)
 else()
   set(NVSHMEM_URL
       "https://paddle-ci.gz.bcebos.com/${NVSHMEM_TAR_NAME}"
       CACHE STRING "" FORCE)
   set(NVSHMEM_DOWNLOAD_COMMAND
       rm -rf extern_nvshmem ${NVSHMEM_TAR_NAME} && wget --no-check-certificate
-      -q ${NVSHMEM_URL} && tar xf ${NVSHMEM_TAR_NAME} && mv nvshmem_src
+      -q ${NVSHMEM_URL} && tar xf ${NVSHMEM_TAR_NAME} --no-same-owner && mv nvshmem_src
       extern_nvshmem)
 endif()
 
-set(NVSHMEM_PATCH_PATH ${PADDLE_SOURCE_DIR}/patches/nvshmem/nvshmem.patch)
+if(CUDA_VERSION VERSION_GREATER_EQUAL 13)
+  set(NVSHMEM_PATCH_PATH
+      ${PADDLE_SOURCE_DIR}/patches/nvshmem/nvshmem_cuda13.patch)
+else()
+  set(NVSHMEM_PATCH_PATH ${PADDLE_SOURCE_DIR}/patches/nvshmem/nvshmem.patch)
+endif()
 set(NVSHMEM_PATCH_COMMAND
     git init && git config --global --add safe.directory ${NVSHMEM_SOURCE_DIR}
     && git config user.name "PaddlePaddle" && git config user.email
